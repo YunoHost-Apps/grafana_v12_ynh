@@ -1,13 +1,8 @@
 #!/bin/bash
 
-## this script is only run if actual change to domain/path is detected, if you're here either $domain or $path changed
-## new location is available via $domain and $path (or $new_domain and $new_path variables if you want to be explicit)
-## old values are available via, you guessed it, $old_domain and $old_path
-
 #=================================================
 # IMPORT GENERIC HELPERS
 #=================================================
-
 source _common.sh
 source /usr/share/yunohost/helpers
 
@@ -16,31 +11,41 @@ source /usr/share/yunohost/helpers
 #=================================================
 ynh_script_progression "Stopping $app's systemd service..."
 
-ynh_systemctl --service="$app" --action="stop"
+ynh_systemctl --action="stop"
 
 #=================================================
 # MODIFY URL IN NGINX CONF
 #=================================================
 ynh_script_progression "Updating NGINX web server configuration..."
 
-# this will most likely adjust NGINX config correctly
 ynh_config_change_url_nginx
 
 #=================================================
 # SPECIFIC MODIFICATIONS
 #=================================================
+ynh_script_progression "Updating $app configuration..."
 
-## do any changes to files that reference specific installation domain/path, i.e. regenerate configs etc
+grafana_conf="$(ynh_app_setting_get --key=install_dir)/config/grafana.ini"
+# Set domain
+sed -i "/^\[server\]$/,/^\[/ s@domain = .*@domain = $new_domain@" $grafana_conf
+# Set final URL
+sed -i "/^\[server\]$/,/^\[/ s@root_url = .*@root_url = https://$new_domain$new_path@" $grafana_conf
+# Specify if using sub_path
+if [ "$new_path" != "/" ]
+then
+	sed -i "/^\[server\]$/,/^\[/ s@serve_from_sub_path = .*@serve_from_sub_path = true@" $grafana_conf
+else
+	sed -i "/^\[server\]$/,/^\[/ s@serve_from_sub_path = .*@serve_from_sub_path = false@" $grafana_conf
+fi
 
 #=================================================
 # START SYSTEMD SERVICE
 #=================================================
 ynh_script_progression "Starting $app's systemd service..."
 
-ynh_systemctl --service="$app" --action="start"
+ynh_systemctl --action=start --wait_until="HTTP Server Listen" --log_path="/var/log/$app/${app%_*}.log"
 
 #=================================================
 # END OF SCRIPT
 #=================================================
-
 ynh_script_progression "Change of URL completed for $app"
